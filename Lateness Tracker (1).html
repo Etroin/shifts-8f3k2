@@ -1,0 +1,1812 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Lateness Tracker</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: phone-first app with three tabs. Today holds the clock, one-tap check in and out, and live advice.
+   Month holds the verdict and the day list. Leave holds the 21 day balance, earned days off and the rules. */
+:root{
+  --bg:#F2F5F4; --surface:#FFFFFF; --ink:#14201C; --muted:#586964; --line:#D6DFDB;
+  --accent:#2A4A9A; --accent-ink:#FFFFFF; --accent-bg:#E3E9F7;
+  --ok:#1B7A4B; --ok-bg:#E1F2E8;
+  --warn:#935500; --warn-bg:#FBEBCF;
+  --bad:#B0281F; --bad-bg:#FBE1DE;
+  --off:#5E6E69; --off-bg:#E8EDEB;
+  --f-ui:'IBM Plex Sans Condensed','Arial Narrow',system-ui,sans-serif;
+  --f-mono:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0E1513; --surface:#162019; --ink:#E4EDE9; --muted:#98A9A3; --line:#263530;
+    --accent:#8DADFF; --accent-ink:#0E1513; --accent-bg:#1D2842;
+    --ok:#62C792; --ok-bg:#163626;
+    --warn:#E6AB45; --warn-bg:#3A2B10;
+    --bad:#F28B83; --bad-bg:#3F1B18;
+    --off:#97A7A1; --off-bg:#202B27;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0E1513; --surface:#162019; --ink:#E4EDE9; --muted:#98A9A3; --line:#263530;
+  --accent:#8DADFF; --accent-ink:#0E1513; --accent-bg:#1D2842;
+  --ok:#62C792; --ok-bg:#163626;
+  --warn:#E6AB45; --warn-bg:#3A2B10;
+  --bad:#F28B83; --bad-bg:#3F1B18;
+  --off:#97A7A1; --off-bg:#202B27;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{
+  background:var(--bg); color:var(--ink);
+  font-family:var(--f-ui); font-size:15px; line-height:1.45;
+  padding-block:16px 96px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px));
+}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.wrap{max-width:46rem;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+.tab{display:flex;flex-direction:column;gap:20px}
+header{display:flex;flex-direction:column;gap:6px}
+.eyebrow{font:500 12px/1 var(--f-mono);letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+h1{margin:0;font-size:30px;line-height:1.1;font-weight:700;letter-spacing:-.01em;text-wrap:balance}
+h2{margin:0 0 10px;font-size:12.5px;line-height:1.2;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.monthbar{display:flex;align-items:center;gap:8px}
+.mlabel{flex:1;text-align:center;font-weight:600;font-size:17px}
+.iconbtn{width:44px;height:44px;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;font:inherit;font-size:20px;cursor:pointer}
+.iconbtn:disabled{opacity:.45;cursor:default}
+.savenote{font:12px/1.4 var(--f-mono);color:var(--muted)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px}
+.muted{color:var(--muted)}
+
+.tabbar{position:fixed;left:0;right:0;bottom:0;z-index:20;display:flex;justify-content:center;
+  background:var(--surface);border-top:1px solid var(--line);
+  padding:0 max(16px,env(safe-area-inset-left,0px)) env(safe-area-inset-bottom,0px) max(16px,env(safe-area-inset-right,0px))}
+.tabbar .in-bar{display:flex;width:100%;max-width:46rem}
+.tabbtn{flex:1;min-height:56px;border:0;background:transparent;color:var(--muted);font:600 15px var(--f-ui);cursor:pointer;border-top:3px solid transparent}
+.tabbtn[aria-current="page"]{color:var(--accent);border-top-color:var(--accent)}
+
+.banner{background:var(--warn-bg);color:var(--warn);border-radius:10px;padding:12px 14px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.banner p{margin:0;flex:1 1 16rem;min-width:0}
+
+.clock{display:flex;flex-direction:column;gap:2px}
+.clock .time{font:600 56px/1 var(--f-mono);letter-spacing:-.02em}
+.clock .date{color:var(--muted);font-size:15px}
+.setrow{display:grid;grid-template-columns:repeat(auto-fit,minmax(10rem,1fr));gap:10px;margin-top:14px}
+.punch{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+.pbox{display:flex;flex-direction:column;gap:6px;min-width:0}
+.pbox .lbl{font-size:12.5px;color:var(--muted)}
+.pbox .val{font:600 22px var(--f-mono)}
+.bigbtn{min-height:64px;border-radius:12px;border:0;background:var(--accent);color:var(--accent-ink);font:700 18px var(--f-ui);cursor:pointer}
+.bigbtn.alt{background:var(--surface);color:var(--accent);border:2px solid var(--accent)}
+.bigbtn:disabled{background:var(--off-bg);color:var(--muted);border:0;cursor:default}
+.undo{align-self:flex-start;min-height:32px;padding:0;border:0;background:transparent;color:var(--accent);font:600 13.5px var(--f-ui);cursor:pointer;text-decoration:underline}
+.advice{display:flex;flex-direction:column;gap:12px;margin-top:2px}
+.advice p{margin:0}
+.adv-head{font-weight:700;font-size:17px;text-wrap:balance}
+.adv-head.ok{color:var(--ok)}
+.adv-head.warn{color:var(--warn)}
+.adv-head.bad{color:var(--bad)}
+.segs{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0;padding:0;list-style:none;align-items:baseline}
+.segs li{display:contents}
+.segs .t{font:600 14px var(--f-mono)}
+.segs .ok .t{color:var(--ok)}
+.segs .warn .t{color:var(--warn)}
+.segs .bad .t{color:var(--bad)}
+.miniwrap{display:grid;grid-template-columns:repeat(auto-fit,minmax(9.5rem,1fr));gap:8px;margin:0}
+
+.verdict .big{font-size:32px;line-height:1.1;font-weight:700;text-wrap:balance}
+.verdict.ok .big{color:var(--ok)}
+.verdict.bad .big{color:var(--bad)}
+.verdict .sub{margin:6px 0 0;color:var(--muted)}
+.meter{margin-top:16px}
+.meter-top{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:13.5px;color:var(--muted)}
+.meter-top b{font:600 14px var(--f-mono);color:var(--ink)}
+.track{height:12px;background:var(--off-bg);border-radius:6px;overflow:hidden;margin-top:6px}
+.fill{height:100%;width:0;background:var(--ok);border-radius:6px;transition:width .3s}
+.fill.warn{background:var(--warn)}
+.fill.bad{background:var(--bad)}
+.meter-scale{display:flex;justify-content:space-between;gap:8px;font:12px var(--f-mono);color:var(--muted);margin-top:5px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(9.5rem,1fr));gap:8px;margin:16px 0 0}
+.stat{background:var(--bg);border-radius:8px;padding:10px 12px;margin:0;min-width:0}
+.stat dt{font-size:12.5px;color:var(--muted)}
+.stat dd{margin:2px 0 0;font:600 14px var(--f-mono)}
+
+.req-item{border-top:1px solid var(--line);padding:12px 0;display:flex;gap:12px;align-items:flex-start;justify-content:space-between}
+.req-item:first-child{border-top:0;padding-top:0}
+.req-main{min-width:0;flex:1}
+.req-date{font-weight:600}
+.req-meta{font:12.5px var(--f-mono);color:var(--muted);margin-top:2px}
+.req-why{margin:4px 0 0;color:var(--bad)}
+.req-soft{margin:4px 0 0;color:var(--warn)}
+.req-alt{margin:4px 0 0;color:var(--accent);font-weight:500}
+.req-btns{display:flex;flex-direction:column;gap:6px}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.btn{min-height:40px;padding:0 14px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:600 14px var(--f-ui);cursor:pointer}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn.small{min-height:36px;padding:0 12px;flex:none}
+textarea{width:100%;margin-top:10px;font:13px/1.4 var(--f-mono);background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:10px}
+
+details.card summary{cursor:pointer;font-weight:600;min-height:32px;display:flex;align-items:center}
+details.card[open] summary{margin-bottom:10px}
+.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:10px}
+.f{display:flex;flex-direction:column;gap:3px;min-width:0}
+.f span{font-size:12.5px;color:var(--muted)}
+.in{width:100%;min-width:0;min-height:44px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:500 15px var(--f-mono)}
+select.in{font-family:var(--f-ui);font-size:14.5px}
+.hint{margin:10px 0 0;font-size:13.5px;color:var(--muted)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.chip{position:relative}
+.chip input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer}
+.chip span{display:inline-flex;align-items:center;justify-content:center;min-width:50px;min-height:40px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);font-weight:600;font-size:14px;color:var(--ink)}
+.chip input:checked + span{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.chip input:focus-visible + span{outline:2px solid var(--accent);outline-offset:2px}
+.symlist{margin:12px 0 0;display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:13.5px;color:var(--muted)}
+.symlist b{font:600 13.5px var(--f-mono);color:var(--ink)}
+
+.fit{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:8px}
+.fitrow{display:grid;grid-template-columns:2.4rem 1fr auto;gap:4px 10px;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
+.fitrow.best{border-color:var(--accent)}
+.fitrow b{font:600 15px var(--f-mono)}
+.fitrow .fr-time{font:12.5px var(--f-mono);color:var(--muted)}
+.fitrow .fr-note{grid-column:1/-1;font-size:13.5px;color:var(--muted)}
+
+.days{background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.days[inert]{opacity:.55}
+.day{padding:12px 14px;border-top:1px solid var(--line);display:grid;gap:10px}
+.day:first-child{border-top:0}
+.day.today{background:var(--accent-bg)}
+.day-top{display:flex;align-items:center;gap:6px 10px;flex-wrap:wrap}
+.dn{font:600 18px var(--f-mono)}
+.dw{color:var(--muted);font-size:13.5px;min-width:2.1rem}
+.shift{font:500 12.5px var(--f-mono);color:var(--muted)}
+.tag{font:600 11px var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+.pill{display:inline-block;padding:2px 10px;border-radius:999px;font-size:12.5px;font-weight:600}
+.pill.ok{background:var(--ok-bg);color:var(--ok)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.pill.accent{background:var(--accent-bg);color:var(--accent)}
+.pill.off{background:var(--off-bg);color:var(--off)}
+.day.today .pill.off{background:var(--surface)}
+.note{margin:0;flex-basis:100%;font-size:13.5px;color:var(--muted)}
+.day.flag .note{color:var(--bad)}
+.inputs{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+@media (min-width:720px){
+  .inputs{grid-template-columns:repeat(3,1fr)}
+}
+
+.bal .big{font:600 40px/1.05 var(--f-mono)}
+.bal .of{color:var(--muted);font-size:15px;margin-top:4px}
+.kv{display:grid;grid-template-columns:1fr auto;gap:6px 12px;margin:14px 0 0;padding:0}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0;font:600 14px var(--f-mono);text-align:right}
+.ev{margin:0;padding:0;list-style:none}
+.ev li{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-top:1px solid var(--line)}
+.ev li:first-child{border-top:0;padding-top:0}
+.ev .l{min-width:0}
+.ev .d{font-weight:600}
+.ev .x{font-size:13.5px;color:var(--muted)}
+.ev .h{font:600 14px var(--f-mono);white-space:nowrap}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+.tabbtn{font-size:14px;padding:0 2px}
+#rText{width:100%;font:13px var(--f-mono);padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);margin:10px 0}
+.ymon{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px}
+.ymon h3{margin:0 0 8px;font-size:16px;display:flex;justify-content:space-between}
+.ygrid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+.yh{font:600 10.5px var(--f-mono);color:var(--muted);text-align:center}
+.yh.fri{color:var(--ok)}
+.yc{min-height:44px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit;padding:2px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer}
+.yc b{font:600 13px var(--f-mono)}
+.yc i{font:normal 600 9.5px var(--f-mono);color:var(--muted)}
+.yc.fri{background:var(--ok-bg)}.yc.fri i{color:var(--ok)}
+.yc.off{background:var(--accent-bg);border-color:var(--accent)}.yc.off i{color:var(--accent)}
+.yc.bad{background:var(--bad-bg)}.yc.bad i{color:var(--bad)}
+.yc.today{outline:2px solid var(--accent)}
+#tab-year,#tab-roster{gap:12px}
+
+</style>
+
+<main class="wrap">
+  <header>
+    <div class="eyebrow">Fingerprint log</div>
+    <h1>Lateness Tracker</h1>
+    <div class="savenote" id="saveNote">Loading your saved data…</div>
+  </header>
+
+  <!-- TODAY -->
+  <section class="tab" id="tab-today">
+    <div class="card">
+      <div class="clock"><div class="time" id="tClock">--:--</div><div class="date" id="tDate"></div></div>
+      <div class="setrow">
+        <label class="f"><span>Today's symbol</span><select class="in" id="tSym"></select></label>
+        <label class="f"><span>Day off today</span>
+          <select class="in" id="tOff">
+            <option value="">Working</option>
+            <option value="leave">Day off, from my leave</option>
+            <option value="earned">Day off, earned day (M1 or M3)</option>
+          </select>
+        </label>
+      </div>
+      <div class="punch">
+        <div class="pbox">
+          <span class="lbl">Check in</span>
+          <span class="val" id="tInVal">Not yet</span>
+          <button class="bigbtn" id="btnIn" type="button">Check in now</button>
+          <button class="undo" id="undoIn" type="button" hidden>Undo check in</button>
+        </div>
+        <div class="pbox">
+          <span class="lbl">Check out</span>
+          <span class="val" id="tOutVal">Not yet</span>
+          <button class="bigbtn alt" id="btnOut" type="button">Check out now</button>
+          <button class="undo" id="undoOut" type="button" hidden>Undo check out</button>
+        </div>
+      </div>
+      <p class="hint">The buttons save this phone's clock. Your fingerprint time is the official one, so fix a time in the Month tab if they differ.</p>
+    </div>
+
+    <section class="card">
+      <h2>What to do</h2>
+      <div class="advice" id="advice"></div>
+    </section>
+
+    <section class="card">
+      <h2>This month</h2>
+      <dl class="miniwrap">
+        <div class="stat"><dt>Allowance left</dt><dd id="miAllow"></dd></div>
+        <div class="stat"><dt>Requests used</dt><dd id="miReq"></dd></div>
+        <div class="stat"><dt>Leave left</dt><dd id="miLeave"></dd></div>
+      </dl>
+    </section>
+
+    <section class="card" id="fitBox">
+      <h2>Which symbol fits?</h2>
+      <div class="form-grid">
+        <label class="f"><span>I arrive at</span><input class="in" id="fitIn" type="time"></label>
+        <label class="f"><span>I leave at (optional)</span><input class="in" id="fitOut" type="time"></label>
+      </div>
+      <ul class="fit" id="fitList"></ul>
+      <p class="hint" id="fitMsg"></p>
+    </section>
+  </section>
+
+  <!-- MONTH -->
+  <section class="tab" id="tab-month" hidden>
+    <div class="banner" id="banner" hidden>
+      <p>These rows are examples, not your data. Edit any field and the examples are replaced by your entries.</p>
+      <button class="btn small" id="clearSample" type="button">Clear examples</button>
+    </div>
+    <div class="monthbar">
+      <button class="iconbtn" id="prev" type="button" aria-label="Previous month">&#8249;</button>
+      <div class="mlabel" id="monthLabel" aria-live="polite"></div>
+      <button class="iconbtn" id="next" type="button" aria-label="Next month">&#8250;</button>
+    </div>
+
+    <section class="card verdict ok" id="verdict" aria-live="polite">
+      <div class="big" id="vBig">No request needed</div>
+      <p class="sub" id="vSub"></p>
+      <div class="meter">
+        <div class="meter-top">
+          <span>Allowance used <b id="mUsed">0</b> of <b id="mAllow">359</b> min</span>
+          <span><b id="mLeft">359</b> min left</span>
+        </div>
+        <div class="track"><div class="fill" id="mFill"></div></div>
+        <div class="meter-scale"><span>0</span><span id="rulesLine"></span></div>
+      </div>
+      <dl class="stats">
+        <div class="stat"><dt>Free lates</dt><dd id="stFree">0 days</dd></div>
+        <div class="stat"><dt>Counted lates</dt><dd id="stCounted">0 days</dd></div>
+        <div class="stat"><dt>Over daily limit</dt><dd id="stCap">0 days</dd></div>
+        <div class="stat"><dt>Requests used</dt><dd id="stReq">0 of 3</dd></div>
+      </dl>
+    </section>
+
+    <section class="card" id="reqBox">
+      <h2>What to file</h2>
+      <div id="reqList"></div>
+      <div class="actions" id="reqActions" hidden>
+        <button class="btn primary" id="copyAll" type="button">Copy all</button>
+      </div>
+      <div id="fallback" hidden>
+        <p class="hint">Copy is blocked here. Select the text below and copy it.</p>
+        <textarea id="fallbackBox" rows="7" readonly aria-label="Request text to copy"></textarea>
+      </div>
+    </section>
+
+    <details class="card" id="fillBox">
+      <summary>Fill the roster fast</summary>
+      <label class="f"><span>Shift symbol</span>
+        <select class="in" id="fillSym">
+          <option value="M1">M1 · 08:00 to 13:45</option>
+          <option value="M3">M3 · 09:00 to 14:45</option>
+          <option value="X1">X1 · 08:00 to 16:54</option>
+          <option value="X2" selected>X2 · 09:00 to 17:45</option>
+        </select>
+      </label>
+      <div class="chips" id="chips" role="group" aria-label="Days to fill">
+        <label class="chip"><input type="checkbox" id="wd0" value="0" checked><span>Sun</span></label>
+        <label class="chip"><input type="checkbox" id="wd1" value="1" checked><span>Mon</span></label>
+        <label class="chip"><input type="checkbox" id="wd2" value="2" checked><span>Tue</span></label>
+        <label class="chip"><input type="checkbox" id="wd3" value="3" checked><span>Wed</span></label>
+        <label class="chip"><input type="checkbox" id="wd4" value="4" checked><span>Thu</span></label>
+        <label class="chip"><input type="checkbox" id="wd5" value="5"><span>Fri</span></label>
+        <label class="chip"><input type="checkbox" id="wd6" value="6"><span>Sat</span></label>
+      </div>
+      <div class="actions"><button class="btn primary" id="fillBtn" type="button">Apply to this month</button></div>
+      <p class="hint" id="fillMsg">Sets the same symbol on the ticked weekdays. Fix single days in the list afterwards.</p>
+    </details>
+
+    <section>
+      <h2>Days</h2>
+      <div class="days" id="days"></div>
+    </section>
+  </section>
+
+  <!-- YEAR -->
+  <section class="tab" id="tab-year" hidden>
+    <section class="card">
+      <h2 id="yrTitle"></h2>
+      <p class="hint" id="yrSub" style="margin-top:0"></p>
+      <p class="hint">Green = Friday, free day off. Blue = day off you took or booked. Tap any day to open it in the Month tab.</p>
+    </section>
+    <div id="yearGrid" style="display:grid;gap:12px"></div>
+  </section>
+
+  <!-- ROSTER -->
+  <section class="tab" id="tab-roster" hidden>
+    <section class="card">
+      <h2>Roster table</h2>
+      <p class="hint" style="margin-top:0">Copy the department table (names down the side, one column per day) and paste it here. Then choose your name and your shifts are filled in.</p>
+      <label class="f"><span>Month</span><select class="in" id="rMonth"></select></label>
+      <textarea id="rText" rows="8" placeholder="Paste the roster table here" aria-label="Roster table"></textarea>
+      <label class="f" id="rPicBox" hidden><span>Upload a picture of the table</span><input class="in" id="rPic" type="file" accept="image/*"></label>
+      <p class="hint" id="rPicMsg" hidden></p>
+      <div class="actions"><button class="btn" id="rRead" type="button">Read table</button></div>
+      <label class="f"><span>My name</span><select class="in" id="rName"></select></label>
+      <div class="actions"><button class="btn primary" id="rApply" type="button">Use my row for this month</button></div>
+      <p class="hint" id="rMsg">Paste the table, then tap Read table.</p>
+    </section>
+  </section>
+
+  <!-- LEAVE -->
+  <section class="tab" id="tab-leave" hidden>
+    <section class="card">
+      <h2>What I have and what to do</h2>
+      <div class="advice" id="planBox"></div>
+    </section>
+
+    <section class="card bal">
+      <h2>Days off left this leave year</h2>
+      <div class="big" id="lbBig">21 days</div>
+      <div class="of" id="lbOf"></div>
+      <div class="track"><div class="fill" id="lbFill"></div></div>
+      <dl class="kv">
+        <dt>Late and early requests</dt><dd id="lbReq">0 h</dd>
+        <dt>Days off from leave</dt><dd id="lbOff">0 h</dd>
+        <dt>Resets on</dt><dd id="lbReset"></dd>
+      </dl>
+    </section>
+
+    <section class="card">
+      <h2>Earned days off</h2>
+      <div class="bal"><div class="big" id="ecBig">0</div><div class="of" id="ecOf"></div></div>
+      <dl class="kv">
+        <dt>X1 or X2 shifts worked</dt><dd id="ecX">0</dd>
+        <dt>Earned, 1 per 2 shifts</dt><dd id="ecEarned">0</dd>
+        <dt>Already used</dt><dd id="ecUsed">0</dd>
+      </dl>
+      <p class="hint">An earned day off can only replace a day off on an M1 or M3 day. It cannot pay for a late or early request.</p>
+    </section>
+
+    <section class="card">
+      <h2>What this leave year used</h2>
+      <ul class="ev" id="evList"></ul>
+    </section>
+
+    <section class="card">
+      <h2>What a day off costs</h2>
+      <dl class="kv" id="priceList"></dl>
+    </section>
+
+    <section class="card" id="backupBox">
+      <h2>Backup</h2>
+      <p class="hint" style="margin-top:0">Copy a backup before you clear your browser data or move to another phone. Paste it into the box on the new device to restore it.</p>
+      <div class="actions"><button class="btn primary" id="bkCopy" type="button">Copy backup</button></div>
+      <textarea id="bkBox" rows="4" placeholder="Paste a backup here to restore it" aria-label="Backup text"></textarea>
+      <div class="actions"><button class="btn" id="bkRestore" type="button">Restore backup</button></div>
+      <p class="hint" id="bkMsg"></p>
+    </section>
+
+    <details class="card" id="rulesBox">
+      <summary>Rules in use</summary>
+      <div class="form-grid">
+        <label class="f"><span>Monthly allowance (min)</span><input class="in" id="sAllow" type="number" inputmode="numeric" min="0" step="1"></label>
+        <label class="f"><span>Daily limit (min)</span><input class="in" id="sCap" type="number" inputmode="numeric" min="0" step="1"></label>
+        <label class="f"><span>Free if late up to (min)</span><input class="in" id="sFree" type="number" inputmode="numeric" min="0" step="1"></label>
+        <label class="f"><span>Requests per month</span><input class="in" id="sReq" type="number" inputmode="numeric" min="0" step="1"></label>
+        <label class="f"><span>Days off per year</span><input class="in" id="sLeave" type="number" inputmode="numeric" min="0" step="1"></label>
+        <label class="f"><span>Leave year resets in month (1-12)</span><input class="in" id="sReset" type="number" inputmode="numeric" min="1" max="12" step="1"></label>
+        <label class="f"><span>Hours in an M day</span><input class="in" id="sMh" type="number" inputmode="numeric" min="1" step="1"></label>
+        <label class="f"><span>Hours in an X day</span><input class="in" id="sXh" type="number" inputmode="numeric" min="1" step="1"></label>
+        <label class="f"><span>Late over the free minutes</span>
+          <select class="in" id="sMode">
+            <option value="full">Count all the minutes</option>
+            <option value="excess">Count only the minutes over the free limit</option>
+          </select>
+        </label>
+      </div>
+      <div class="symlist">
+        <b>M1</b><span>08:00 to 13:45</span>
+        <b>M3</b><span>09:00 to 14:45</span>
+        <b>X1</b><span>08:00 to 16:54</span>
+        <b>X2</b><span>09:00 to 17:45</span>
+      </div>
+      <p class="hint" id="sMsg">A late or early request is 1 or 2 hours and takes that many hours from your days off. A 1 hour request wipes out 60 minutes of lateness and a 2 hour request wipes out 120. Symbol changes have no limit.</p>
+    </details>
+  </section>
+</main>
+
+<nav class="tabbar" aria-label="Sections">
+  <div class="in-bar">
+    <button class="tabbtn" type="button" data-tab="today">Today</button>
+    <button class="tabbtn" type="button" data-tab="month">Month</button>
+    <button class="tabbtn" type="button" data-tab="year">Year</button>
+    <button class="tabbtn" type="button" data-tab="roster">Roster</button>
+    <button class="tabbtn" type="button" data-tab="leave">Days off</button>
+  </div>
+</nav>
+
+<script>
+(function(){
+'use strict';
+
+var DEF={allow:359,cap:59,free:30,mode:'full',reqMax:3,leaveDays:21,resetMonth:7,mHours:6,xHours:9,seeded:[]};
+/* Roster read from the department table, one entry per calendar day. A dash is a day with no shift (Friday). */
+var ROSTER={
+  '2026-11':['M3','M3','M3','M3','M3','-','M3','M3','M3','M3','M3','M3','-','M3','M3','M3','M3','M3','M3','-','M3','M3','M3','M3','M3','M3','-','M3','M3','M3']
+};
+var DOW=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+var DOWL=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+var MONL=['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+//<compute>
+var SYM={M1:['08:00','13:45'],M3:['09:00','14:45'],X1:['08:00','16:54'],X2:['09:00','17:45']};
+function pad(n){return String(n).padStart(2,'0');}
+function toMin(s){
+  if(!s) return null;
+  var m=/^(\d{1,2}):(\d{2})/.exec(s);
+  return m ? (+m[1])*60+(+m[2]) : null;
+}
+function fmtT(m){
+  m=((m%1440)+1440)%1440;
+  return pad(Math.floor(m/60))+':'+pad(m%60);
+}
+function isX(sym){return sym==='X1'||sym==='X2';}
+function effSym(x){
+  var c=x.c||'';
+  if(SYM[c]) return c;
+  return SYM[x.s]?x.s:'';
+}
+function hrs(v){return v==='2'||v===2?2:(v==='1'||v===1?1:0);}
+function dayEval(ri,ro,ai,ao,past){
+  var o={late:0,early:0,noIn:false,noOut:false};
+  if(ai===null){ if(past) o.noIn=true; }
+  else o.late=Math.max(0,ai-ri);
+  if(ro!==null && ao!==null){
+    var R=ro<ri?ro+1440:ro;
+    var A=ao;
+    if(ai!==null && ao<ai) A=ao+1440;
+    else if(ai===null && ro<ri && ao<ri) A=ao+1440;
+    var early=R-A;
+    if(early>0) o.early=early;
+  }else if(ai!==null && ao===null && past){
+    o.noOut=true;
+  }
+  return o;
+}
+/* Lateness after a request of h hours: each hour wipes out 60 minutes. */
+function lateCost(L,h,st){
+  var eff=Math.max(0,L-60*h);
+  if(eff<=st.free) return {ok:true,eff:eff,min:0};
+  var b=Math.min(eff,st.cap);
+  var m=st.mode==='excess'?Math.max(0,b-st.free):b;
+  return {ok:eff<=st.cap,eff:eff,min:m};
+}
+/* Cheapest way to handle a day with nothing filed yet. Leave hours are the scarce thing, minutes are cheap. */
+function planOf(o,st,left){
+  var hL=0,min=0,okL=true,okE=true,hE=0;
+  if(o.late>st.free){
+    okL=false;
+    for(var h=0;h<=2;h++){
+      var c=lateCost(o.late,h,st);
+      if(c.ok && c.min<=left){hL=h;min=c.min;okL=true;break;}
+    }
+  }
+  if(o.early>0){
+    if(o.early<=60) hE=1; else if(o.early<=120) hE=2; else okE=false;
+  }
+  var ok=okL&&okE;
+  return {ok:ok,hL:okL?hL:0,hE:okE?hE:0,hours:(okL?hL:0)+(okE?hE:0),req:(okL&&hL>0?1:0)+(okE&&hE>0?1:0),min:ok?min:0};
+}
+function planKey(p){return p.ok?p.hours*10000+p.min:1e9;}
+function planPieces(p){
+  var a=[];
+  if(p.hL>0) a.push('a '+p.hL+' h late request');
+  if(p.hE>0) a.push('a '+p.hE+' h early request');
+  return a.join(' and ');
+}
+function planText(p){
+  if(!p.ok) return 'more than a 2 h request can cover';
+  var a=[];
+  var pc=planPieces(p);
+  if(pc) a.push(pc+' (uses '+p.hours+' h of leave)');
+  if(p.min>0) a.push(p.min+' min of allowance');
+  return a.length?a.join(' and '):'nothing';
+}
+function compute(ym,days,st,today){
+  var p=ym.split('-').map(Number), Y=p[0], M=p[1];
+  var n=new Date(Y,M,0).getDate();
+  var running=0, rows=[];
+  var sum={freeDays:0,freeMin:0,countedDays:0,countedMin:0,capDays:0,requests:0,needSym:0,reqNeed:0,hoursNeed:0,
+           used:0,over:0,left:st.allow,reqUsed:0,reqLeft:st.reqMax,reqHours:0,symChanges:0,saveDays:0,saveMin:0,
+           dayOffHours:0,dayOffM:0,dayOffX:0,creditsUsed:0,xWorked:0,symTips:0};
+  for(var d=1;d<=n;d++){
+    var date=ym+'-'+pad(d);
+    var x=days[date]||{};
+    var sym=effSym(x);
+    var t=sym?SYM[sym]:null;
+    var ri=t?toMin(t[0]):null, ro=t?toMin(t[1]):null;
+    var ai=toMin(x.ai), ao=toMin(x.ao);
+    var past=date<today;
+    var rl=hrs(x.rl), re=hrs(x.re);
+    var r={date:date,d:d,dow:new Date(Y,M-1,d).getDay(),x:x,sym:sym,status:'off',late:0,early:0,counted:0,reasons:[],run:running,before:running,
+           hasRoster:ri!==null,suggest:null,cur:null,offHours:0};
+    if(x.c) sum.symChanges++;
+    sum.reqUsed+=(rl>0?1:0)+(re>0?1:0);
+    sum.reqHours+=rl+re;
+    if(x.off){
+      if(!sym){
+        r.status='problem'; r.reasons=['Pick the roster symbol so the day off can be priced'];
+        r.offHours=st.mHours; sum.dayOffHours+=st.mHours; sum.dayOffM++;
+      }else if(x.off==='earned'){
+        if(isX(sym)){r.status='problem'; r.reasons=['An earned day off only works on an M1 or M3 day'];}
+        else{r.status='dayoff'; sum.creditsUsed++; sum.dayOffM++;}
+      }else{
+        var oh=isX(sym)?st.xHours:st.mHours;
+        r.status='dayoff'; r.offHours=oh; sum.dayOffHours+=oh;
+        if(isX(sym)) sum.dayOffX++; else sum.dayOffM++;
+      }
+      rows.push(r);
+      continue;
+    }
+    if(isX(sym) && ai!==null) sum.xWorked++;
+    var o;
+    if(ri===null){
+      o={late:0,early:0,noIn:false,noOut:false};
+    }else o=dayEval(ri,ro,ai,ao,past);
+    r.late=o.late; r.early=o.early;
+    var reasons=[], counted=0, overflow=false;
+    var lc=lateCost(o.late,rl,st);
+    counted=lc.min;
+    if(!lc.ok){
+      reasons.push(rl>0
+        ? 'Late '+o.late+' min. Even with a '+rl+' h request it is '+(lc.eff-st.cap)+' min above the '+st.cap+' min daily limit'
+        : 'Late '+o.late+' min, '+(o.late-st.cap)+' min above the '+st.cap+' min daily limit');
+    }
+    if(o.early>0 && re*60<o.early){
+      reasons.push(re>0
+        ? 'Left '+o.early+' min early, more than a '+re+' h request covers'
+        : 'Left '+o.early+' min before the shift end');
+    }
+    var missingNote='';
+    if(o.noIn) missingNote='No check-in recorded. Enter the time from your fingerprint record.';
+    else if(o.noOut) missingNote='No check-out recorded. Enter the time from your fingerprint record.';
+    if(ri===null && ai!==null) reasons.push('Checked in on a day with no shift symbol');
+    var before=running;
+    if(counted>0){
+      running+=counted;
+      var portion=Math.max(0,running-Math.max(before,st.allow));
+      if(portion>0){reasons.push(portion+' min beyond the '+st.allow+' min monthly allowance');overflow=true;}
+    }
+    var status;
+    if(reasons.length) status='request';
+    else if(counted>0) status='counted';
+    else if(rl>0||re>0) status='excused';
+    else if(ri===null) status='off';
+    else if(missingNote) status='missing';
+    else if(ai===null) status='pending';
+    else if(o.late>0) status='free';
+    else status='ontime';
+    r.missingNote=missingNote;
+    r.status=status; r.counted=counted; r.reasons=reasons; r.run=running; r.before=before;
+    r.unneeded=[];
+    if(rl>0 && ai!==null && o.late<=st.free) r.unneeded.push('late');
+    if(re>0 && ao!==null && o.early===0) r.unneeded.push('early');
+    r.symSuggest=null;
+    if(rl===0 && re===0 && ai!==null && ao!==null && ri!==null){
+      var curLen=ro-ri, bestS=null;
+      Object.keys(SYM).forEach(function(k){
+        if(k===sym) return;
+        var lenk=toMin(SYM[k][1])-toMin(SYM[k][0]);
+        if(lenk<=curLen) return;
+        var pk=planOf(dayEval(toMin(SYM[k][0]),toMin(SYM[k][1]),ai,ao,past),st,Math.max(0,st.allow-before));
+        if(!pk.ok||pk.hours>0||pk.min>0) return;
+        var dist=Math.abs(toMin(SYM[k][1])-ao);
+        if(!bestS||lenk>bestS.len||(lenk===bestS.len&&dist<bestS.dist)) bestS={sym:k,len:lenk,dist:dist};
+      });
+      r.symSuggest=bestS;
+    }
+    var need=reasons.length, needH=reasons.length;
+    var hasLE=o.late>st.free||o.early>0;
+    if(rl===0 && re===0 && (status==='request'||status==='counted') && ai!==null && ri!==null && hasLE){
+      var left=Math.max(0,st.allow-before);
+      var cur=planOf(o,st,left);
+      var best=null;
+      Object.keys(SYM).forEach(function(k){
+        if(k===sym) return;
+        var ok2=dayEval(toMin(SYM[k][0]),toMin(SYM[k][1]),ai,ao,past);
+        var pl=planOf(ok2,st,left);
+        if(planKey(pl)>=planKey(cur)) return;
+        var dist=Math.abs(toMin(SYM[k][1])-(ao!==null?ao:ro));
+        if(!best||planKey(pl)<planKey(best)||(planKey(pl)===planKey(best)&&dist<best.dist)){
+          best={sym:k,ok:pl.ok,hL:pl.hL,hE:pl.hE,hours:pl.hours,req:pl.req,min:pl.min,dist:dist,stay:(ao===null?SYM[k][1]:null)};
+        }
+      });
+      r.suggest=best; r.cur=cur;
+      if(best){need=best.req;needH=best.hours;}
+      else if(cur.ok){need=cur.req;needH=cur.hours;}
+    }
+    if(o.late>0 && o.late<=st.free && rl===0) {sum.freeDays++;sum.freeMin+=o.late;}
+    if(counted>0){sum.countedDays++;sum.countedMin+=counted;}
+    if(!lc.ok) sum.capDays++;
+    if(r.symSuggest && !(r.suggest && r.suggest.sym===r.symSuggest.sym)) sum.symTips++;
+    if(status==='request'){
+      sum.requests++; sum.reqNeed+=need; sum.hoursNeed+=needH;
+      if(r.suggest) sum.needSym++;
+    }else if(status==='counted' && r.suggest){
+      sum.saveDays++; sum.saveMin+=r.cur.min-r.suggest.min;
+    }
+    rows.push(r);
+  }
+  sum.used=running;
+  sum.over=Math.max(0,running-st.allow);
+  sum.left=Math.max(0,st.allow-running);
+  sum.reqLeft=Math.max(0,st.reqMax-sum.reqUsed);
+  return {rows:rows,sum:sum};
+}
+function lyMonths(ym,resetMonth){
+  var p=ym.split('-').map(Number), Y=p[0], M=p[1];
+  var y0=M>=resetMonth?Y:Y-1, out=[];
+  for(var i=0;i<12;i++){
+    var m=resetMonth+i, y=y0;
+    if(m>12){m-=12;y+=1;}
+    out.push(y+'-'+pad(m));
+  }
+  return out;
+}
+function yearStats(st,today,getDays){
+  var months=lyMonths(today.slice(0,7),st.resetMonth);
+  var t={reqHours:0,reqUsed:0,dayOffHours:0,dayOffM:0,dayOffX:0,xWorked:0,creditsUsed:0,events:[]};
+  months.forEach(function(ym){
+    var r=compute(ym,getDays(ym),st,today);
+    t.reqHours+=r.sum.reqHours; t.reqUsed+=r.sum.reqUsed;
+    t.dayOffHours+=r.sum.dayOffHours; t.dayOffM+=r.sum.dayOffM; t.dayOffX+=r.sum.dayOffX;
+    t.xWorked+=r.sum.xWorked; t.creditsUsed+=r.sum.creditsUsed;
+    r.rows.forEach(function(row){
+      var x=row.x, rl=hrs(x.rl), re=hrs(x.re);
+      if(x.off) t.events.push({date:row.date,kind:'off',sym:row.sym,off:x.off,hours:row.offHours,problem:row.status==='problem'});
+      if(rl>0) t.events.push({date:row.date,kind:'late',hours:rl});
+      if(re>0) t.events.push({date:row.date,kind:'early',hours:re});
+    });
+  });
+  t.total=st.leaveDays*st.mHours;
+  t.used=t.reqHours+t.dayOffHours;
+  t.left=t.total-t.used;
+  t.earned=Math.floor(t.xWorked/2);
+  t.creditsLeft=t.earned-t.creditsUsed;
+  return t;
+}
+/* Arrival time bands for one shift: what each minute of lateness costs. */
+function arrivalSegments(st,left){
+  var segs=[],prev=null;
+  for(var L=0;L<=240;L++){
+    var p=planOf({late:L,early:0},st,left);
+    var key=!p.ok?'x':(p.hL>0?'r'+p.hL:(p.min>0?'m':'f'));
+    if(!prev||prev.key!==key){prev={key:key,from:L,to:L};segs.push(prev);}
+    else prev.to=L;
+  }
+  return segs;
+}
+//</compute>
+
+var settings=Object.assign({},DEF);
+var S={cur:'',today:'',ym:'',months:{},loaded:{},dirty:{},sample:false,sampleDays:null,hasData:false,mode:'local',db:null,uid:null,
+       hasSettings:false,res:null,real:null,yr:null,loading:true,readFailed:false,tab:'today'};
+var rowEls={};
+var el={};
+function $(id){return el[id];}
+
+function dateLabel(date){
+  var p=date.split('-').map(Number);
+  return DOW[new Date(p[0],p[1]-1,p[2]).getDay()]+' '+p[2]+' '+MON[p[1]-1]+' '+p[0];
+}
+function localToday(){
+  var d=new Date();
+  return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+}
+function nowMin(){var d=new Date();return d.getHours()*60+d.getMinutes();}
+function plural(n,w){return n+' '+w+(n===1?'':'s');}
+function symText(k){return SYM[k]?k+' '+SYM[k][0]+' to '+SYM[k][1]:'';}
+function fmtDays(h){var d=Math.round(h/settings.mHours*100)/100;return d+(d===1?' day':' days');}
+function fmtHours(h){return (Math.round(h*100)/100)+' h';}
+
+/* ---------- storage ---------- */
+function lsGet(k){try{var v=localStorage.getItem(k);return v?JSON.parse(v):null;}catch(e){return null;}}
+function lsSet(k,v){try{localStorage.setItem(k,JSON.stringify(v));return true;}catch(e){return false;}}
+function withTimeout(p,ms){return Promise.race([p,new Promise(function(_,rej){setTimeout(function(){rej(new Error('timeout'));},ms);})]);}
+function clone(o){return JSON.parse(JSON.stringify(o));}
+function sleep(ms){return new Promise(function(r){setTimeout(r,ms);});}
+
+async function initStore(){
+  try{
+    var c=window.claude;
+    if(!c||!c.use) return;
+    var got=await Promise.all([c.use('db'),c.use('user')]);
+    var db=got[0], user=got[1];
+    if(!db||!user) return;
+    var uid=await user.id();
+    if(uid){S.db=db;S.uid=uid;S.mode='cloud';}
+  }catch(e){}
+}
+function col(){return S.db.collection('data/users/'+S.uid);}
+
+function applySettings(v){
+  function iv(a,d,lo){return Number.isInteger(a)&&a>=lo?a:d;}
+  settings={
+    allow:iv(v.allow,DEF.allow,0), cap:iv(v.cap,DEF.cap,0), free:iv(v.free,DEF.free,0),
+    mode:v.mode==='excess'?'excess':'full',
+    reqMax:iv(v.reqMax,DEF.reqMax,0), leaveDays:iv(v.leaveDays,DEF.leaveDays,0),
+    resetMonth:(Number.isInteger(v.resetMonth)&&v.resetMonth>=1&&v.resetMonth<=12)?v.resetMonth:DEF.resetMonth,
+    mHours:iv(v.mHours,DEF.mHours,1), xHours:iv(v.xHours,DEF.xHours,1),
+    seeded:Array.isArray(v.seeded)?v.seeded.filter(function(q){return typeof q==='string';}):[]
+  };
+}
+/* Fill each roster month once. Later edits stay, and a month already filled is never filled again. */
+function seedRoster(){
+  var changed=[];
+  Object.keys(ROSTER).forEach(function(ym){
+    if(settings.seeded.indexOf(ym)>=0) return;
+    var arr=ROSTER[ym], days=S.months[ym]||(S.months[ym]={});
+    arr.forEach(function(sym,i){
+      if(!SYM[sym]) return;
+      var date=ym+'-'+pad(i+1);
+      var x=days[date]||(days[date]={});
+      if(!x.s && !x.off) x.s=sym;
+    });
+    settings.seeded.push(ym);
+    changed.push(ym);
+  });
+  if(changed.length){
+    S.hasData=true;
+    changed.forEach(function(ym){S.dirty[ym]=true;});
+    saveChain=saveChain.then(async function(){
+      try{await writeSettings();}catch(e){}
+      await doSave();
+    });
+  }
+}
+function fillSettingsForm(){
+  $('sAllow').value=settings.allow; $('sCap').value=settings.cap; $('sFree').value=settings.free;
+  $('sReq').value=settings.reqMax; $('sMode').value=settings.mode; $('sLeave').value=settings.leaveDays;
+  $('sReset').value=settings.resetMonth; $('sMh').value=settings.mHours; $('sXh').value=settings.xHours;
+}
+async function loadSettings(){
+  var v=null;
+  if(S.mode==='cloud'){
+    try{
+      var s=await withTimeout(col().doc('settings').get(),8000);
+      if(s.exists) v=clone(s.data());
+    }catch(e){S.mode='local';S.readFailed=true;}
+  }
+  if(S.mode==='local') v=lsGet('lt:settings');
+  if(v){applySettings(v);S.hasSettings=true;}
+  fillSettingsForm();
+}
+function migrate(days){
+  Object.keys(days).forEach(function(k){
+    var x=days[k];
+    if(typeof x.rq==='string'){
+      if(x.rq.indexOf('sym:')===0 && !x.c) x.c=x.rq.slice(4);
+      delete x.rq;
+    }
+  });
+  return days;
+}
+async function loadMonthDoc(ym){
+  var days=null;
+  if(S.mode==='cloud'){
+    try{
+      var s=await withTimeout(col().doc('m-'+ym).get(),8000);
+      if(s.exists) days=clone(s.data().days||{});
+    }catch(e){
+      S.mode='local';S.readFailed=true;
+      var l0=lsGet('lt:m:'+ym); if(l0) days=l0.days||{};
+    }
+  }else{
+    var l=lsGet('lt:m:'+ym); if(l) days=l.days||{};
+  }
+  return days;
+}
+async function ensureMonths(list){
+  var todo=list.filter(function(ym){return !S.loaded[ym];});
+  var res=await Promise.all(todo.map(loadMonthDoc));
+  todo.forEach(function(ym,i){
+    S.loaded[ym]=true;
+    if(res[i]){S.months[ym]=migrate(res[i]);S.hasData=true;}
+    else if(!S.months[ym]) S.months[ym]={};
+  });
+}
+function realDays(ym){
+  if(S.sample && ym===S.cur) return {};
+  return S.months[ym]||(S.months[ym]={});
+}
+function viewDays(ym){
+  if(S.sample && ym===S.cur) return S.sampleDays;
+  return S.months[ym]||(S.months[ym]={});
+}
+function cleanDays(days){
+  var out={};
+  Object.keys(days).forEach(function(k){
+    var x=days[k],y={};
+    ['s','c','ai','ao','rl','re','off'].forEach(function(f){if(x[f]) y[f]=x[f];});
+    if(Object.keys(y).length) out[k]=y;
+  });
+  return out;
+}
+var saveTimer=null, saveChain=Promise.resolve();
+function setNote(t){$('saveNote').textContent=t;}
+function storageNote(){
+  if(S.readFailed) return 'Could not reach your saved data. Working on this device only.';
+  return S.mode==='cloud'
+    ? 'Saved to your account. Open this page on any device.'
+    : 'Saved on this device only. Clearing browser data erases it.';
+}
+async function writeSettings(){
+  var v={allow:settings.allow,cap:settings.cap,free:settings.free,mode:settings.mode,reqMax:settings.reqMax,
+         leaveDays:settings.leaveDays,resetMonth:settings.resetMonth,mHours:settings.mHours,xHours:settings.xHours,
+         seeded:settings.seeded.slice()};
+  if(S.mode==='cloud') await col().doc('settings').set(v);
+  else if(!lsSet('lt:settings',v)) throw new Error('storage blocked');
+  S.hasSettings=true;
+}
+async function doSave(){
+  var keys=Object.keys(S.dirty);
+  try{
+    for(var i=0;i<keys.length;i++){
+      var ym=keys[i];
+      var payload={days:cleanDays(S.months[ym]||{}),updated:new Date().toISOString()};
+      if(S.mode==='cloud') await col().doc('m-'+ym).set(payload);
+      else if(!lsSet('lt:m:'+ym,payload)) throw new Error('storage blocked');
+      delete S.dirty[ym];
+    }
+    if(!S.hasSettings) await writeSettings();
+    setNote(storageNote());
+  }catch(e){
+    setNote('Could not save. Change a field again to retry.');
+  }
+}
+function queueSave(ym){
+  S.dirty[ym]=true;
+  setNote('Saving…');
+  if(saveTimer) clearTimeout(saveTimer);
+  saveTimer=setTimeout(function(){saveTimer=null;saveChain=saveChain.then(doSave);},400);
+}
+function flush(){
+  if(saveTimer){clearTimeout(saveTimer);saveTimer=null;saveChain=saveChain.then(doSave);}
+  return saveChain;
+}
+
+/* ---------- example data ---------- */
+function sampleDays(ym){
+  var p=ym.split('-').map(Number), Y=p[0], M=p[1];
+  var n=new Date(Y,M,0).getDate();
+  var cycle=['X2','M1','M3','X1','M1','X2','M3'];
+  var punches=[['09:12','17:49'],['09:00','17:45'],['09:00',null]];
+  var k=0, out={};
+  for(var d=1;d<=n;d++){
+    var dow=new Date(Y,M-1,d).getDay();
+    if(dow===5||dow===6) continue;
+    var date=ym+'-'+pad(d);
+    var s=cycle[k%cycle.length];
+    var x={s:s};
+    if(date<=S.today){
+      if(k<punches.length){
+        x.ai=punches[k][0]; if(punches[k][1]) x.ao=punches[k][1];
+      }else{
+        x.ai=SYM[s][0];
+        if(date<S.today) x.ao=SYM[s][1];
+      }
+    }
+    k++;
+    out[date]=x;
+  }
+  return out;
+}
+
+/* ---------- editing helpers ---------- */
+function editDay(date){
+  var ym=date.slice(0,7);
+  if(S.sample){S.sample=false;S.sampleDays=null;buildRows();}
+  var days=S.months[ym]||(S.months[ym]={});
+  return {x:days[date]||(days[date]={}),ym:ym};
+}
+function setField(date,f,v){
+  var e=editDay(date);
+  if(v) e.x[f]=v; else delete e.x[f];
+  queueSave(e.ym);
+}
+function planFromRow(r){
+  if(!r) return null;
+  if(r.cur){
+    var g=r.suggest;
+    if(g) return {sym:g.sym,hL:g.hL,hE:g.hE};
+    if(r.cur.ok&&r.cur.hours>0) return {sym:r.sym,hL:r.cur.hL,hE:r.cur.hE};
+  }
+  if(r.symSuggest) return {sym:r.symSuggest.sym,hL:0,hE:0};
+  return null;
+}
+function tipText(r){
+  var g=r.symSuggest; if(!g) return '';
+  if(r.suggest && r.suggest.sym===g.sym) return '';
+  return 'You worked '+r.x.ai+' to '+r.x.ao+', a full '+g.sym+' shift ('+SYM[g.sym][0]+' to '+SYM[g.sym][1]+'). Your roster says '+r.sym+'. Ask for a symbol change to '+g.sym+'. It uses no leave'+(isX(g.sym)&&!isX(r.sym)?' and it counts as an X shift toward your earned day off':'')+'.';
+}
+function unneededText(r){
+  var a=[], h=0;
+  if(r.unneeded.indexOf('late')>=0){a.push('Nothing was late, so the '+hrs(r.x.rl)+' h late request is not needed.');h+=hrs(r.x.rl);}
+  if(r.unneeded.indexOf('early')>=0){a.push('Nothing was early, so the '+hrs(r.x.re)+' h early request is not needed.');h+=hrs(r.x.re);}
+  return a.join(' ')+' It still uses '+h+' h of your leave. Remove it if it was a mistake.';
+}
+function dropReq(date){
+  var ym=date.slice(0,7), days=S.months[ym]; if(!days||!days[date]) return;
+  var row=null;
+  var res=compute(ym,days,settings,S.today);
+  res.rows.forEach(function(q){if(q.date===date) row=q;});
+  if(!row) return;
+  var x=days[date];
+  if(row.unneeded.indexOf('late')>=0) delete x.rl;
+  if(row.unneeded.indexOf('early')>=0) delete x.re;
+  queueSave(ym);
+  if(ym===S.ym) refreshRowFields(date);
+  update();
+}
+function applyPlan(date,p){
+  var e=editDay(date), x=e.x;
+  if(p.sym && p.sym!==x.s) x.c=p.sym; else delete x.c;
+  if(p.hL>0) x.rl=String(p.hL); else delete x.rl;
+  if(p.hE>0) x.re=String(p.hE); else delete x.re;
+  queueSave(e.ym);
+  if(date.slice(0,7)===S.ym) refreshRowFields(date);
+  update();
+}
+
+/* ---------- Month tab rendering ---------- */
+function symOptions(withOff){
+  return (withOff?'<option value="">Not set</option>':'')+
+    Object.keys(SYM).map(function(k){return '<option value="'+k+'">'+k+' · '+SYM[k][0]+'-'+SYM[k][1]+'</option>';}).join('');
+}
+function refreshRowFields(date){
+  var art=rowEls[date]; if(!art) return;
+  var x=(viewDays(S.ym)[date])||{};
+  art.querySelector('[data-f="s"]').value=x.s||'';
+  art.querySelector('[data-f="c"]').value=x.c||'';
+  art.querySelector('[data-f="ai"]').value=x.ai||'';
+  art.querySelector('[data-f="ao"]').value=x.ao||'';
+  art.querySelector('[data-f="rl"]').value=x.rl||'';
+  art.querySelector('[data-f="re"]').value=x.re||'';
+  art.querySelector('[data-f="off"]').value=x.off||'';
+}
+function buildRows(){
+  var p=S.ym.split('-').map(Number), Y=p[0], M=p[1];
+  var n=new Date(Y,M,0).getDate();
+  var box=$('days');
+  box.innerHTML='';
+  rowEls={};
+  var frag=document.createDocumentFragment();
+  var chg='<option value="">No change</option>'+Object.keys(SYM).map(function(k){return '<option value="'+k+'">To '+k+' · '+SYM[k][0]+'-'+SYM[k][1]+'</option>';}).join('');
+  var rq='<option value="">None</option><option value="1">1 hour</option><option value="2">2 hours</option>';
+  var off='<option value="">Working</option><option value="leave">Day off, from leave</option><option value="earned">Day off, earned (M1 or M3)</option>';
+  for(var d=1;d<=n;d++){
+    var date=S.ym+'-'+pad(d);
+    var dow=new Date(Y,M-1,d).getDay();
+    var art=document.createElement('article');
+    art.className='day'+(date===S.today?' today':'');
+    art.dataset.date=date;
+    art.innerHTML=
+      '<div class="day-top"><span class="dn">'+pad(d)+'</span><span class="dw">'+DOW[dow]+'</span>'+
+      '<span class="shift"></span><span class="pill off"></span>'+(date===S.today?'<span class="tag">Today</span>':'')+
+      '<p class="note" hidden></p></div>'+
+      '<div class="inputs">'+
+      '<label class="f"><span>Roster symbol</span><select class="in" data-f="s" id="s-'+date+'">'+symOptions(true)+'</select></label>'+
+      '<label class="f"><span>Symbol change</span><select class="in" data-f="c" id="c-'+date+'">'+chg+'</select></label>'+
+      '<label class="f"><span>Check in</span><input class="in" type="time" data-f="ai" id="ai-'+date+'"></label>'+
+      '<label class="f"><span>Check out</span><input class="in" type="time" data-f="ao" id="ao-'+date+'"></label>'+
+      '<label class="f"><span>Late request</span><select class="in" data-f="rl" id="rl-'+date+'">'+rq+'</select></label>'+
+      '<label class="f"><span>Early request</span><select class="in" data-f="re" id="re-'+date+'">'+rq+'</select></label>'+
+      '<label class="f" style="grid-column:1/-1"><span>Day off</span><select class="in" data-f="off" id="off-'+date+'">'+off+'</select></label>'+
+      '</div>';
+    rowEls[date]=art;
+    frag.appendChild(art);
+    refreshRowFields(date);
+  }
+  box.appendChild(frag);
+}
+
+function sugText(r){
+  if(!r.cur) return '';
+  var g=r.suggest;
+  var base='Staying on '+r.sym+': '+(r.cur.ok?planText(r.cur):'too far off for a request, take it as a day off')+'.';
+  if(!g) return 'No other symbol is cheaper. '+base;
+  var t='Change to '+g.sym+' ('+SYM[g.sym][0]+' to '+SYM[g.sym][1]+'): '+planText(g)+'. '+base;
+  if(g.stay) t+=' Stay until '+g.stay+'.';
+  return t;
+}
+function paintRow(r,st){
+  var art=rowEls[r.date]; if(!art) return;
+  var txt,cls,note='';
+  switch(r.status){
+    case 'ontime': txt='On time';cls='ok';break;
+    case 'free': txt='Free · '+r.late+' min';cls='ok';note=r.late+' min late. Not counted.';break;
+    case 'counted':
+      txt='Counted · '+r.counted+' min';cls='warn';
+      note=r.late+' min late. Total this month '+r.run+' of '+st.allow+' min.';
+      if(r.suggest) note+=' '+sugText(r);
+      break;
+    case 'request':
+      txt='Action needed';cls='bad';
+      note=r.reasons.join('. ')+'.';
+      var sg=sugText(r); if(sg) note+=' '+sg;
+      break;
+    case 'excused':
+      txt='Request filed';cls='accent';
+      note='Covered by your request. It uses '+(hrs(r.x.rl)+hrs(r.x.re))+' h of leave.';
+      break;
+    case 'dayoff':
+      txt='Day off';cls='accent';
+      note=r.x.off==='earned'?'Uses one earned day off.':'Uses '+fmtDays(r.offHours)+' ('+fmtHours(r.offHours)+') of leave.';
+      break;
+    case 'problem': txt='Check this day';cls='bad';note=r.reasons.join('. ')+'.';break;
+    case 'pending': txt='Planned';cls='off';break;
+    case 'missing': txt='Times missing';cls='off';note=r.missingNote;break;
+    default: txt=r.dow===5?'Friday · free day off':'No shift';cls=r.dow===5?'ok':'off';
+  }
+  var hasUn=r.unneeded&&r.unneeded.length>0;
+  if(hasUn && r.status==='excused'){txt='Request not needed';cls='warn';note='';}
+  var tp=tipText(r);
+  if(tp){
+    if(r.status==='ontime'||r.status==='free'||r.status==='pending'){txt='Ask for '+r.symSuggest.sym;cls='accent';}
+    note=(note?note+' ':'')+tp;
+  }else if(r.x.c && r.x.c!==r.x.s && !r.reasons.length){
+    note=(note?note+' ':'')+'Changed from '+r.x.s+' to '+r.x.c+'. A symbol change uses no leave.';
+  }
+  if(hasUn) note=(note?note+' ':'')+unneededText(r);
+  var pill=art.querySelector('.pill');
+  pill.textContent=txt; pill.className='pill '+cls;
+  var nt=art.querySelector('.note');
+  nt.textContent=note; nt.hidden=!note;
+  var sh=art.querySelector('.shift');
+  if(r.sym){
+    var changed=r.x.s && r.x.s!==r.sym;
+    sh.textContent=(changed?r.x.s+' → ':'')+r.sym+' '+SYM[r.sym][0]+'-'+SYM[r.sym][1];
+  }else sh.textContent='';
+  art.classList.toggle('flag',r.status==='request'||r.status==='problem');
+}
+
+function reqText(r){
+  var x=r.x;
+  var lines=[dateLabel(r.date),
+    'Shift: '+(r.sym?symText(r.sym):'none'),
+    'Fingerprint: '+(x.ai||'none')+' to '+(x.ao||'none')];
+  if(r.reasons.length) r.reasons.forEach(function(s){lines.push('Issue: '+s);});
+  else if(r.status==='counted') lines.push('Issue: Late '+r.late+' min, counted against the monthly allowance');
+  else if(r.symSuggest) lines.push('Note: worked a full '+r.symSuggest.sym+' shift on a '+r.sym+' day');
+  var g=r.suggest, pl=g||(r.cur&&r.cur.ok?r.cur:null);
+  if(!g && !pl && r.symSuggest){
+    lines.push('Request: change symbol to '+r.symSuggest.sym);
+  }else if(g){
+    var pc=planPieces(g);
+    lines.push('Request: change symbol to '+g.sym+(pc?' and file '+pc:''));
+  }else if(pl){
+    lines.push('Request: file '+planPieces(pl));
+  }else lines.push('Request: late arrival or early leave');
+  return lines.join('\n');
+}
+
+function listed(res){
+  return res.rows.filter(function(r){return r.status==='request'||(r.status==='counted'&&r.suggest)||tipText(r)||(r.unneeded&&r.unneeded.length);});
+}
+function renderSummary(res){
+  var s=res.sum, bad=s.requests>0, st=settings, yr=S.yr;
+  var v=$('verdict');
+  v.className='card verdict '+(bad?'bad':'ok');
+  $('vBig').textContent=bad?(s.requests===1?'1 day needs action':s.requests+' days need action'):'No request needed';
+  var sub;
+  if(bad){
+    sub='Taking the cheapest option on each day you need '+s.reqNeed+' request'+(s.reqNeed===1?'':'s')+', '+fmtHours(s.hoursNeed)+' of leave.';
+    if(s.reqNeed>s.reqLeft) sub+=' You have '+s.reqLeft+' of '+st.reqMax+' requests left, so you are short by '+(s.reqNeed-s.reqLeft)+'.';
+    else sub+=' You have '+s.reqLeft+' of '+st.reqMax+' requests left.';
+    if(yr && s.hoursNeed>yr.left) sub+=' That is more than the '+fmtHours(Math.max(0,yr.left))+' of leave you have left.';
+    if(s.needSym) sub+=' '+plural(s.needSym,'day')+(s.needSym===1?' costs':' cost')+' less with a symbol change.';
+  }else{
+    sub='Every day so far fits inside your rules. Requests used: '+s.reqUsed+' of '+st.reqMax+'.';
+  }
+  if(s.saveDays>0) sub+=' A symbol change on '+plural(s.saveDays,'counted day')+' would give back '+s.saveMin+' min.';
+  if(s.symTips>0) sub+=' '+plural(s.symTips,'day')+(s.symTips===1?' looks':' look')+' like a different symbol. Ask for a symbol change, it uses no leave.';
+  if(s.over>0) sub+=' You are '+s.over+' min over the monthly allowance.';
+  $('vSub').textContent=sub;
+  $('mUsed').textContent=s.used;
+  $('mAllow').textContent=st.allow;
+  $('mLeft').textContent=s.left;
+  var pct=st.allow>0?Math.min(100,s.used/st.allow*100):(s.used>0?100:0);
+  $('mFill').style.width=pct+'%';
+  $('mFill').className='fill'+(s.used>st.allow?' bad':(pct>=80?' warn':''));
+  $('rulesLine').textContent=st.free+' free · '+st.cap+' per day · '+st.allow+' per month';
+  $('stFree').textContent=plural(s.freeDays,'day')+' · '+s.freeMin+' min';
+  $('stCounted').textContent=plural(s.countedDays,'day')+' · '+s.countedMin+' min';
+  $('stCap').textContent=plural(s.capDays,'day');
+  $('stReq').textContent=s.reqUsed+' of '+st.reqMax;
+}
+function renderReqs(res){
+  var list=listed(res);
+  var box=$('reqList');
+  if(!list.length){
+    box.innerHTML='<p class="muted" style="margin:0">Nothing to file so far this month.</p>';
+  }else{
+    box.innerHTML=list.map(function(r){
+      var x=r.x;
+      var why=r.status==='request'?r.reasons.join('. ')+'.':(r.status==='counted'?'Late '+r.late+' min. It counts '+r.counted+' min against your allowance.':'');
+      var can=planFromRow(r);
+      var tp=tipText(r), un=(r.unneeded&&r.unneeded.length)?unneededText(r):'';
+      return '<div class="req-item"><div class="req-main"><div class="req-date">'+dateLabel(r.date)+'</div>'+
+        '<div class="req-meta">'+(r.sym?symText(r.sym):'No shift symbol')+' · Fingerprint '+(x.ai||'none')+' to '+(x.ao||'none')+'</div>'+
+        (why?'<p class="'+(r.status==='request'?'req-why':'req-soft')+'">'+why+'</p>':'')+
+        (sugText(r)&&(r.status==='request'||r.status==='counted')?'<p class="req-alt">'+sugText(r)+'</p>':'')+
+        (tp?'<p class="req-alt">'+tp+'</p>':'')+
+        (un?'<p class="req-soft">'+un+'</p>':'')+
+        '</div><div class="req-btns">'+
+        (can?'<button class="btn small primary" type="button" data-act="apply" data-date="'+r.date+'">Mark as filed</button>':'')+
+        (un?'<button class="btn small" type="button" data-act="dropReq" data-date="'+r.date+'">Remove request</button>':'')+
+        '<button class="btn small" type="button" data-copy="'+r.date+'">Copy</button></div></div>';
+    }).join('');
+  }
+  $('reqActions').hidden=list.length<2;
+}
+
+/* ---------- Which symbol fits ---------- */
+function fitRows(ai,ao,left){
+  var st=settings;
+  var rows=Object.keys(SYM).map(function(k,i){
+    var o=dayEval(toMin(SYM[k][0]),toMin(SYM[k][1]),ai,ao,false);
+    var p=planOf(o,st,left);
+    var cls,txt;
+    if(!p.ok){cls='bad';txt='Too far off for a request';}
+    else if(p.hours>0){cls='bad';txt='Needs '+planPieces(p)+(p.min>0?' and counts '+p.min+' min':'');}
+    else if(p.min>0){cls='warn';txt='Counts '+p.min+' min';}
+    else{cls='ok';txt=o.late>0?'Free · '+o.late+' min late':'On time';}
+    var note=[];
+    if(o.late>0&&!p.ok&&o.late>st.cap) note.push('Late '+o.late+' min');
+    if(o.early>0) note.push('Leaving '+o.early+' min early');
+    if(!note.length&&ao===null) note.push('Stay until '+SYM[k][1]);
+    return {k:k,i:i,p:p,cls:cls,txt:txt,note:note.join('. '),
+      score:planKey(p)+(ao!==null?Math.abs(toMin(SYM[k][1])-ao)/10000:0)};
+  });
+  rows.sort(function(a,b){return a.score-b.score||a.i-b.i;});
+  return rows;
+}
+function renderFit(){
+  var ai=toMin($('fitIn').value), ao=toMin($('fitOut').value);
+  if(ai===null){
+    $('fitList').innerHTML='';
+    $('fitMsg').textContent='Enter the time you arrive, or arrived.';
+    return;
+  }
+  var left=S.real?S.real.sum.left:settings.allow;
+  var rows=fitRows(ai,ao,left);
+  $('fitList').innerHTML=rows.map(function(r,idx){
+    return '<li class="fitrow'+(idx===0?' best':'')+'"><b>'+r.k+'</b><span class="fr-time">'+SYM[r.k][0]+' to '+SYM[r.k][1]+'</span>'+
+      '<span class="pill '+r.cls+'">'+r.txt+'</span>'+(r.note?'<span class="fr-note">'+r.note+'.</span>':'')+'</li>';
+  }).join('');
+  var top=rows[0];
+  if(top.p.ok&&top.p.hours===0&&top.p.min===0) $('fitMsg').textContent='If your roster shows another symbol, ask for a change to '+top.k+'. It costs nothing.';
+  else if(top.p.ok) $('fitMsg').textContent='Cheapest is '+top.k+': '+planText(top.p)+'. The symbol change itself has no limit.';
+  else $('fitMsg').textContent='No symbol fits and a 2 hour request is not enough. Take it as a day off.';
+}
+
+/* ---------- Today tab ---------- */
+function todayRow(){
+  if(!S.real) return null;
+  for(var i=0;i<S.real.rows.length;i++) if(S.real.rows[i].date===S.today) return S.real.rows[i];
+  return null;
+}
+function segLabel(seg,ri){
+  var a=fmtT(ri+seg.from), b=fmtT(ri+seg.to);
+  switch(seg.key){
+    case 'f': return {c:'ok',t:'until '+b,x:'Free. Not counted.'};
+    case 'm': return {c:'warn',t:a+' to '+b,x:'Counts against your allowance.'};
+    case 'r1': return {c:'bad',t:a+' to '+b,x:'File a 1 h late request.'};
+    case 'r2': return {c:'bad',t:a+' to '+b,x:'File a 2 h late request.'};
+    default: return {c:'bad',t:'after '+fmtT(ri+seg.from-1),x:'A request cannot cover this. Take it as a day off.'};
+  }
+}
+function adviceHTML(T){
+  var st=settings, out=[];
+  function head(cls,t){out.push('<p class="adv-head '+cls+'">'+t+'</p>');}
+  function para(t){out.push('<p>'+t+'</p>');}
+  function btn(label,act,extra){out.push('<div class="actions" style="margin-top:0"><button class="btn primary" type="button" data-act="'+act+'" '+(extra||'')+'>'+label+'</button></div>');}
+  if(!T){return '<p class="muted">Loading today…</p>';}
+  if(T.status==='dayoff'){
+    head('ok','Day off today');
+    para(T.x.off==='earned'?'This uses one earned day off. Nothing comes out of your leave.':'This uses '+fmtDays(T.offHours)+' ('+fmtHours(T.offHours)+') of your leave.');
+    return out.join('');
+  }
+  if(T.status==='problem'){head('bad','Check today');para(T.reasons.join('. ')+'.');return out.join('');}
+  if(!T.sym){
+    if(new Date().getDay()===5){head('ok','Friday: free day off');para('Fridays are always off and use no leave. If you are called in, pick the symbol above.');return out.join('');}
+    var rs=ROSTER[S.today.slice(0,7)];
+    if(rs && rs[+S.today.slice(8)-1]==='-'){
+      head('off','No shift on your roster today');
+      para('Your roster has nothing for today. If you are called in, pick the symbol above and the advice appears here.');
+    }else{
+      head('off','Pick today\'s symbol');
+      para('Choose M1, M3, X1 or X2 above and the advice appears here.');
+    }
+    return out.join('');
+  }
+  var ri=toMin(SYM[T.sym][0]), ro=toMin(SYM[T.sym][1]), now=nowMin();
+  var left=Math.max(0,st.allow-T.before);
+  var x=T.x;
+  if(!x.ai){
+    var late=now-ri;
+    if(late<=0){
+      head('ok','You are early. Shift starts at '+SYM[T.sym][0]);
+    }else{
+      var rows=fitRows(now,null,left);
+      var mine=rows.filter(function(r){return r.k===T.sym;})[0];
+      head(mine.cls,'If you check in now: '+(mine.p.ok?(mine.p.hours>0?'file '+planPieces(mine.p):(mine.p.min>0?'counts '+mine.p.min+' min':(late>0?'free, '+late+' min late':'on time'))):'too far off for a request'));
+      var best=rows[0];
+      if(best.k!==T.sym && planKey(best.p)<planKey(mine.p)) para('Cheaper: ask for a change to '+best.k+' ('+SYM[best.k][0]+' to '+SYM[best.k][1]+'). It costs '+planText(best.p)+'.');
+    }
+    para('Arrival bands for '+T.sym+' today:');
+    out.push('<ul class="segs">'+arrivalSegments(st,left).map(function(s){var l=segLabel(s,ri);return '<li class="'+l.c+'"><span class="t">'+l.t+'</span><span>'+l.x+'</span></li>';}).join('')+'</ul>');
+    return out.join('');
+  }
+  // checked in
+  if(T.status==='request'||T.status==='counted'||T.status==='excused'||T.status==='free'||T.status==='ontime'||T.status==='pending'){
+    if(T.status==='ontime') head('ok','On time at '+x.ai);
+    else if(T.status==='free') head('ok','Free: '+T.late+' min late, not counted');
+    else if(T.status==='counted') head('warn','Counts '+T.counted+' min of your allowance');
+    else if(T.status==='excused') head('ok','Covered by your request');
+    else if(T.status==='pending') head('ok','Checked in at '+x.ai);
+    else head('bad','Action needed: '+T.reasons.join('. '));
+    if(T.status==='request'||T.status==='counted'){
+      var sg=T.status==='request'?sugText(T):(T.suggest?sugText(T):'');
+      if(sg) para(sg);
+      var pl=planFromRow(T);
+      if(pl) btn(pl.sym!==T.sym?'Mark as filed: change to '+pl.sym+(pl.hL?' and a '+pl.hL+' h late request':''):'Mark late request as filed ('+pl.hL+' h)','applyToday');
+    }
+  }
+  if(!x.ao){
+    if(now<ro){
+      var E=ro-now;
+      var pe=planOf({late:0,early:E},st,left);
+      para('It is '+fmtT(now)+'. Leaving now is '+E+' min early. Stay until '+fmtT(ro)+(pe.ok?', or file '+planPieces(pe)+' (uses '+pe.hE+' h of leave).':'. That is more than a 2 h request covers.'));
+      if(pe.ok && !hrs(x.re)) btn('Mark early request as filed ('+pe.hE+' h)','earlyToday','data-h="'+pe.hE+'"');
+    }else para('Your shift has ended. You can check out without any request.');
+  }else{
+    if(T.early>0 && T.status!=='request'){
+      para('You left '+T.early+' min early. Covered by your '+hrs(x.re)+' h request.');
+    }else if(T.early>0){
+      var pe2=planOf({late:0,early:T.early},st,left);
+      if(pe2.ok && !hrs(x.re)) btn('Mark early request as filed ('+pe2.hE+' h)','earlyToday','data-h="'+pe2.hE+'"');
+    }else if(T.status==='ontime'||T.status==='free'||T.status==='excused'||T.status==='counted') para('Day complete. You left at '+x.ao+'.');
+    var tp=tipText(T);
+    if(tp){para(tp);btn('Mark symbol change as filed','applyToday');}
+  }
+  if(T.unneeded&&T.unneeded.length){
+    para(unneededText(T));
+    out.push('<div class="actions" style="margin-top:0"><button class="btn" type="button" data-act="dropReq" data-date="'+T.date+'">Remove request</button></div>');
+  }
+  return out.join('');
+}
+function renderToday(){
+  var T=todayRow();
+  var d=new Date();
+  $('tDate').textContent=DOWL[d.getDay()]+' '+d.getDate()+' '+MONL[d.getMonth()]+' '+d.getFullYear();
+  $('tClock').textContent=pad(d.getHours())+':'+pad(d.getMinutes());
+  var x=T?T.x:{};
+  if(document.activeElement!==$('tSym')) $('tSym').value=x.s||'';
+  if(document.activeElement!==$('tOff')) $('tOff').value=x.off||'';
+  $('tInVal').textContent=x.ai||'Not yet';
+  $('tOutVal').textContent=x.ao||'Not yet';
+  $('btnIn').disabled=!!x.ai||!!x.off;
+  $('btnOut').disabled=!!x.ao||!x.ai||!!x.off;
+  $('undoIn').hidden=!x.ai;
+  $('undoOut').hidden=!x.ao;
+  $('advice').innerHTML=adviceHTML(T);
+  var s=S.real?S.real.sum:null, yr=S.yr;
+  if(s){
+    $('miAllow').textContent=s.left+' of '+settings.allow+' min';
+    $('miReq').textContent=s.reqUsed+' of '+settings.reqMax;
+  }
+  if(yr) $('miLeave').textContent=fmtDays(Math.max(0,yr.left));
+}
+
+/* ---------- Leave tab ---------- */
+function renderLeave(){
+  var yr=S.yr, st=settings; if(!yr) return;
+  var leftDays=Math.round(yr.left/st.mHours*100)/100;
+  $('lbBig').textContent=(leftDays<0?'-':'')+Math.abs(leftDays)+(Math.abs(leftDays)===1?' day':' days');
+  $('lbBig').style.color=yr.left<0?'var(--bad)':'';
+  $('lbOf').textContent=fmtHours(yr.left)+' left of '+fmtHours(yr.total)+' ('+st.leaveDays+' days of '+st.mHours+' h)';
+  var pct=yr.total>0?Math.min(100,yr.used/yr.total*100):100;
+  $('lbFill').style.width=pct+'%';
+  $('lbFill').className='fill'+(yr.left<0?' bad':(pct>=80?' warn':''));
+  $('lbReq').textContent=fmtHours(yr.reqHours)+' · '+plural(yr.reqUsed,'request');
+  $('lbOff').textContent=fmtHours(yr.dayOffHours)+' · '+fmtDays(yr.dayOffHours);
+  var d=new Date(); var ry=d.getMonth()+1>=st.resetMonth?d.getFullYear()+1:d.getFullYear();
+  var resetDate=new Date(ry,st.resetMonth-1,1);
+  var days=Math.ceil((resetDate-new Date(d.getFullYear(),d.getMonth(),d.getDate()))/86400000);
+  $('lbReset').textContent='1 '+MON[st.resetMonth-1]+' '+ry+' · in '+plural(days,'day');
+  $('ecBig').textContent=Math.max(0,yr.creditsLeft)+(Math.max(0,yr.creditsLeft)===1?' day':' days');
+  $('ecOf').textContent=yr.xWorked%2===0?'Next one after 2 more X shifts':'Next one after 1 more X shift';
+  $('ecX').textContent=yr.xWorked;
+  $('ecEarned').textContent=yr.earned;
+  $('ecUsed').textContent=yr.creditsUsed;
+  var ev=yr.events.slice().sort(function(a,b){return a.date<b.date?-1:1;});
+  $('evList').innerHTML=ev.length?ev.map(function(e){
+    var label,extra,h;
+    if(e.kind==='late'){label='Late request';extra='';h=fmtHours(e.hours);}
+    else if(e.kind==='early'){label='Early request';extra='';h=fmtHours(e.hours);}
+    else if(e.off==='earned'){label='Day off, earned day';extra=e.sym||'';h='0 h';}
+    else{label='Day off from leave';extra=e.sym||'no symbol set';h=fmtHours(e.hours);}
+    return '<li><div class="l"><div class="d">'+dateLabel(e.date)+'</div><div class="x">'+label+(extra?' · '+extra:'')+'</div></div><div class="h">'+h+'</div></li>';
+  }).join(''):'<li class="muted">Nothing used yet this leave year.</li>';
+  $('priceList').innerHTML=
+    '<dt>M1 or M3 day off</dt><dd>1 day · '+st.mHours+' h</dd>'+
+    '<dt>X1 or X2 day off</dt><dd>'+(Math.round(st.xHours/st.mHours*100)/100)+' days · '+st.xHours+' h</dd>'+
+    '<dt>1 h request</dt><dd>'+(Math.round(100/st.mHours)/100)+' day · 1 h</dd>'+
+    '<dt>2 h request</dt><dd>'+(Math.round(200/st.mHours)/100)+' day · 2 h</dd>';
+}
+
+function viewedMonthLabel(){
+  var p=S.ym.split('-').map(Number);
+  $('monthLabel').textContent=MONL[p[1]-1]+' '+p[0];
+}
+function update(){
+  var st=settings;
+  S.res=compute(S.ym,viewDays(S.ym),st,S.today);
+  S.real=compute(S.cur,realDays(S.cur),st,S.today);
+  S.yr=yearStats(st,S.today,function(ym){return realDays(ym);});
+  viewedMonthLabel();
+  S.res.rows.forEach(function(r){paintRow(r,st);});
+  renderSummary(S.res);
+  renderReqs(S.res);
+  renderToday();
+  renderFit();
+  renderLeave();renderYear();renderPlan();
+  $('banner').hidden=!S.sample;
+}
+function setLoading(on){
+  S.loading=on;
+  $('days').inert=on;
+  $('prev').disabled=on; $('next').disabled=on;
+}
+
+/* ---------- copy ---------- */
+async function copyText(text,btn){
+  try{
+    await navigator.clipboard.writeText(text);
+    $('fallback').hidden=true;
+    if(btn){var o=btn.textContent;btn.textContent='Copied';setTimeout(function(){btn.textContent=o;},1500);}
+  }catch(e){
+    $('fallback').hidden=false;
+    $('fallbackBox').value=text;
+    $('fallbackBox').focus();
+    $('fallbackBox').select();
+  }
+}
+
+/* ---------- tabs ---------- */
+var TABS=['today','month','year','roster','leave'];
+function showTab(name){
+  if(TABS.indexOf(name)<0) name='today';
+  S.tab=name;
+  TABS.forEach(function(t){$('tab-'+t).hidden=(t!==name);});
+  Array.prototype.forEach.call(document.querySelectorAll('.tabbtn'),function(b){
+    if(b.dataset.tab===name) b.setAttribute('aria-current','page'); else b.removeAttribute('aria-current');
+  });
+}
+function tabFromHash(){
+  var h=''; try{h=(location.hash||'').replace('#','');}catch(e){}
+  return TABS.indexOf(h)>=0?h:'today';
+}
+
+/* ---------- events ---------- */
+function bind(){
+  document.addEventListener('click',function(e){
+    var tb=e.target.closest('.tabbtn');
+    if(tb){
+      showTab(tb.dataset.tab);
+      try{location.hash='#'+tb.dataset.tab;}catch(err){}
+      window.scrollTo(0,0);
+      return;
+    }
+    var yd=e.target.closest('[data-ymd]');
+    if(yd){openDay(yd.dataset.ymd);return;}
+    var cp=e.target.closest('[data-copy]');
+    if(cp&&S.res){
+      var r=S.res.rows.filter(function(q){return q.date===cp.dataset.copy;})[0];
+      if(r) copyText('Request\n'+reqText(r),cp);
+      return;
+    }
+    var a=e.target.closest('[data-act]');
+    if(!a) return;
+    var act=a.dataset.act;
+    if(act==='apply'){
+      var row=S.res.rows.filter(function(q){return q.date===a.dataset.date;})[0];
+      var pl=planFromRow(row);
+      if(pl) applyPlan(a.dataset.date,pl);
+    }else if(act==='dropReq'){
+      dropReq(a.dataset.date);
+    }else if(act==='applyToday'){
+      var T=todayRow(), p2=planFromRow(T);
+      if(T&&p2) applyPlan(T.date,p2);
+    }else if(act==='earlyToday'){
+      var h=a.dataset.h||'1';
+      setField(S.today,'re',h); update();
+    }
+  });
+  $('btnIn').addEventListener('click',function(){
+    var d=new Date(); setField(S.today,'ai',pad(d.getHours())+':'+pad(d.getMinutes())); update();
+    refreshRowFields(S.today); flush();
+  });
+  $('btnOut').addEventListener('click',function(){
+    var d=new Date(); setField(S.today,'ao',pad(d.getHours())+':'+pad(d.getMinutes())); update();
+    refreshRowFields(S.today); flush();
+  });
+  $('undoIn').addEventListener('click',function(){setField(S.today,'ai','');update();refreshRowFields(S.today);});
+  $('undoOut').addEventListener('click',function(){setField(S.today,'ao','');update();refreshRowFields(S.today);});
+  $('tSym').addEventListener('change',function(){setField(S.today,'s',$('tSym').value);update();refreshRowFields(S.today);});
+  $('tOff').addEventListener('change',function(){setField(S.today,'off',$('tOff').value);update();refreshRowFields(S.today);});
+  $('days').addEventListener('change',function(e){
+    var inp=e.target;
+    var f=inp.dataset&&inp.dataset.f;
+    if(!f||S.loading) return;
+    var date=inp.closest('.day').dataset.date;
+    setField(date,f,inp.value);
+    update();
+  });
+  $('clearSample').addEventListener('click',function(){
+    S.sample=false;S.sampleDays=null;buildRows();update();queueSave(S.cur);
+  });
+  $('copyAll').addEventListener('click',function(){
+    if(!S.res) return;
+    copyText(listed(S.res).map(reqText).join('\n\n'),$('copyAll'));
+  });
+  $('fillBtn').addEventListener('click',function(){
+    var sym=$('fillSym').value;
+    var wd=Array.prototype.map.call($('chips').querySelectorAll('input:checked'),function(i){return +i.value;});
+    if(!SYM[sym]){$('fillMsg').textContent='Pick a shift symbol first.';return;}
+    if(!wd.length){$('fillMsg').textContent='Tick at least one weekday.';return;}
+    if(S.sample){S.sample=false;S.sampleDays=null;}
+    var p=S.ym.split('-').map(Number), n=new Date(p[0],p[1],0).getDate(), c=0;
+    var days=S.months[S.ym]||(S.months[S.ym]={});
+    for(var d=1;d<=n;d++){
+      if(wd.indexOf(new Date(p[0],p[1]-1,d).getDay())<0) continue;
+      var date=S.ym+'-'+pad(d);
+      var x=days[date]||(days[date]={});
+      x.s=sym;c++;
+    }
+    buildRows();update();queueSave(S.ym);
+    $('fillMsg').textContent=sym+' set on '+plural(c,'day')+'. Fix single days in the list below.';
+  });
+  $('prev').addEventListener('click',function(){gotoMonth(-1);});
+  $('next').addEventListener('click',function(){gotoMonth(1);});
+  ['sAllow','sCap','sFree','sReq','sMode','sLeave','sReset','sMh','sXh'].forEach(function(id){$(id).addEventListener('change',onSettings);});
+  $('bkCopy').addEventListener('click',async function(){
+    var t=backupText();
+    try{
+      await navigator.clipboard.writeText(t);
+      $('bkMsg').textContent='Backup copied. Paste it somewhere safe, like a note to yourself.';
+    }catch(e){
+      $('bkBox').value=t; $('bkBox').focus(); $('bkBox').select();
+      $('bkMsg').textContent='Copy is blocked here. The backup is in the box. Select it and copy it.';
+    }
+  });
+  $('bkRestore').addEventListener('click',doRestore);
+  $('bkBox').addEventListener('input',resetRestore);
+  $('fitIn').addEventListener('input',renderFit);
+  $('rMonth').addEventListener('change',function(){$('rText').value=RS.tables[$('rMonth').value]||'';rosterRead(false);});
+  $('rRead').addEventListener('click',function(){rosterRead(true);});
+  $('rName').addEventListener('change',function(){var p=RP.people[+$('rName').value];if(p){RS.name=p.name;saveRoster();}});
+  $('rApply').addEventListener('click',rosterApply);
+  $('rPic').addEventListener('change',readPic);
+
+  $('fitOut').addEventListener('input',renderFit);
+  window.addEventListener('hashchange',function(){showTab(tabFromHash());});
+  window.addEventListener('pagehide',function(){flush();});
+  document.addEventListener('visibilitychange',function(){if(document.visibilityState==='hidden') flush();});
+}
+async function gotoMonth(delta){
+  await flush();
+  var p=S.ym.split('-').map(Number);
+  var d=new Date(p[0],p[1]-1+delta,1);
+  S.ym=d.getFullYear()+'-'+pad(d.getMonth()+1);
+  setLoading(true);
+  await ensureMonths([S.ym]);
+  buildRows();update();
+  setLoading(false);
+  setNote(storageNote());
+}
+function onSettings(){
+  var g=function(id){return parseInt($(id).value,10);};
+  var a=g('sAllow'), c=g('sCap'), f=g('sFree'), q=g('sReq'), ld=g('sLeave'), rm=g('sReset'), mh=g('sMh'), xh=g('sXh');
+  var ok=[a,c,f,q,ld,rm,mh,xh].every(function(v){return Number.isInteger(v)&&v>=0&&v<=100000;})&&c>=f&&rm>=1&&rm<=12&&mh>=1&&xh>=1;
+  if(!ok){$('sMsg').textContent='Enter whole numbers. The daily limit must be at least the free minutes, the reset month 1 to 12, and the hours at least 1.';return;}
+  var oldReset=settings.resetMonth;
+  settings={allow:a,cap:c,free:f,mode:$('sMode').value,reqMax:q,leaveDays:ld,resetMonth:rm,mHours:mh,xHours:xh,seeded:settings.seeded};
+  $('sMsg').textContent='Rules updated. Every month is recalculated.';
+  saveChain=saveChain.then(async function(){
+    try{await writeSettings();setNote(storageNote());}catch(e){setNote('Could not save the rules. Change a field again to retry.');}
+  });
+  (async function(){
+    if(rm!==oldReset) await ensureMonths(lyMonths(S.today.slice(0,7),rm));
+    update();
+  })();
+}
+
+/* ---------- backup ---------- */
+function settingsPayload(){
+  return {allow:settings.allow,cap:settings.cap,free:settings.free,mode:settings.mode,reqMax:settings.reqMax,
+          leaveDays:settings.leaveDays,resetMonth:settings.resetMonth,mHours:settings.mHours,xHours:settings.xHours,
+          seeded:settings.seeded.slice()};
+}
+function backupText(){
+  var months={};
+  Object.keys(S.months).forEach(function(ym){
+    if(S.sample && ym===S.cur) return;
+    var d=cleanDays(S.months[ym]);
+    if(Object.keys(d).length) months[ym]=d;
+  });
+  return JSON.stringify({app:'lateness-tracker',v:1,settings:settingsPayload(),months:months});
+}
+function sanitizeDays(src){
+  var out={}, tm=/^\d{2}:\d{2}$/;
+  if(!src||typeof src!=='object') return out;
+  Object.keys(src).forEach(function(date){
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+    var x=src[date]; if(!x||typeof x!=='object') return;
+    var y={};
+    if(typeof x.s==='string'&&SYM[x.s]) y.s=x.s;
+    if(typeof x.c==='string'&&SYM[x.c]) y.c=x.c;
+    if(typeof x.ai==='string'&&tm.test(x.ai)) y.ai=x.ai;
+    if(typeof x.ao==='string'&&tm.test(x.ao)) y.ao=x.ao;
+    if(x.rl==='1'||x.rl==='2') y.rl=x.rl;
+    if(x.re==='1'||x.re==='2') y.re=x.re;
+    if(x.off==='leave'||x.off==='earned') y.off=x.off;
+    if(Object.keys(y).length) out[date]=y;
+  });
+  return out;
+}
+var restoreArmed=false;
+function resetRestore(){restoreArmed=false;$('bkRestore').textContent='Restore backup';}
+function doRestore(){
+  var raw=$('bkBox').value.trim(), o=null;
+  try{o=JSON.parse(raw);}catch(e){}
+  if(!o||o.app!=='lateness-tracker'||!o.months||typeof o.months!=='object'){
+    $('bkMsg').textContent='That is not a backup from this app. Paste the whole text that Copy backup gave you.';
+    resetRestore(); return;
+  }
+  var yms=Object.keys(o.months).filter(function(k){return /^\d{4}-\d{2}$/.test(k);});
+  if(!restoreArmed){
+    restoreArmed=true;
+    $('bkRestore').textContent='Confirm restore';
+    $('bkMsg').textContent='This replaces '+plural(yms.length,'month')+' on this device with the backup. Tap Confirm restore to go ahead.';
+    return;
+  }
+  S.sample=false; S.sampleDays=null;
+  yms.forEach(function(ym){
+    S.months[ym]=migrate(sanitizeDays(o.months[ym])); S.loaded[ym]=true; S.dirty[ym]=true;
+  });
+  if(o.settings&&typeof o.settings==='object'){
+    applySettings(o.settings); fillSettingsForm();
+    saveChain=saveChain.then(async function(){try{await writeSettings();}catch(e){}});
+  }
+  S.hasData=true;
+  resetRestore();
+  $('bkBox').value='';
+  $('bkMsg').textContent='Restored '+plural(yms.length,'month')+'.';
+  buildRows(); update();
+  setNote('Saving…');
+  saveChain=saveChain.then(doSave);
+}
+
+function calMonths(Y){var a=[];for(var m=1;m<=12;m++)a.push(Y+'-'+pad(m));return a;}
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+
+/* ---------- Year tab ---------- */
+function renderYear(){
+  var Y=+S.today.slice(0,4), h='', fri=0, offD=0, earn=0;
+  for(var m=1;m<=12;m++){
+    var ym=Y+'-'+pad(m), res=compute(ym,realDays(ym),settings,S.today);
+    var lead=new Date(Y,m-1,1).getDay(), md=0, cells='';
+    for(var i=0;i<lead;i++) cells+='<span></span>';
+    res.rows.forEach(function(r){
+      var c='',t='';
+      if(r.status==='dayoff'){c='off';if(r.x.off==='earned'){t='Earned';earn++;}else{t='Off';md++;offD++;}}
+      else if(r.status==='problem'){c='bad';t='Check';}
+      else if(r.dow===5&&!r.sym){c='fri';t='Free';fri++;}
+      else if(r.sym){t=r.sym;if(r.status==='request')c='bad';}
+      if(r.date===S.today) c+=' today';
+      cells+='<button type="button" class="yc '+c+'" data-ymd="'+r.date+'"><b>'+r.d+'</b><i>'+t+'</i></button>';
+    });
+    h+='<section class="ymon"><h3><span>'+MONL[m-1]+'</span><span class="muted">'+(md?plural(md,'day')+' off':'')+'</span></h3><div class="ygrid">'+
+      DOW.map(function(w,k){return '<span class="yh'+(k===5?' fri':'')+'">'+w+'</span>';}).join('')+cells+'</div></section>';
+  }
+  $('yearGrid').innerHTML=h;
+  $('yrTitle').textContent=Y;
+  $('yrSub').textContent=plural(fri,'Friday')+' free days off · '+plural(offD,'leave day')+' taken or booked'+(earn?' · '+plural(earn,'earned day'):'');
+}
+async function openDay(date){
+  S.ym=date.slice(0,7);
+  await ensureMonths([S.ym]);
+  buildRows();update();showTab('month');
+  try{location.hash='#month';}catch(e){}
+  var a=rowEls[date]; if(a) a.scrollIntoView();
+}
+
+/* ---------- Days off plan ---------- */
+function renderPlan(){
+  var yr=S.yr, st=settings; if(!yr) return;
+  var d=new Date(), t0=new Date(d.getFullYear(),d.getMonth(),d.getDate());
+  var ry=d.getMonth()+1>=st.resetMonth?d.getFullYear()+1:d.getFullYear();
+  var reset=new Date(ry,st.resetMonth-1,1), daysTo=Math.max(1,Math.ceil((reset-t0)/86400000));
+  var left=yr.left/st.mHours, fr=0, booked=0, o=[];
+  for(var q=new Date(t0);q<reset;q.setDate(q.getDate()+1)) if(q.getDay()===5) fr++;
+  yr.events.forEach(function(e){if(e.kind==='off'&&e.off==='leave'&&e.date>S.today) booked+=e.hours;});
+  if(left<0) o.push('<p class="adv-head bad">You are '+fmtDays(-yr.left)+' over your leave</p>');
+  else o.push('<p class="adv-head ok">You have '+fmtDays(yr.left)+' of leave left</p>');
+  o.push('<p>Your leave year ends in '+plural(daysTo,'day')+' (1 '+MON[st.resetMonth-1]+' '+ry+'). '+(booked>0?'Already booked ahead: '+fmtDays(booked)+'.':'Nothing booked ahead yet.')+'</p>');
+  if(left>0) o.push('<p>To use them all, take about '+(Math.round(left/(daysTo/30.4)*10)/10)+' days a month. Pick them in the Month or Year tab. A day next to a Friday gives you 2 days off in a row.</p>');
+  else o.push('<p>You have no leave left. Any more days off or requests go below zero.</p>');
+  o.push('<p>'+(yr.creditsLeft>0?'You have '+plural(yr.creditsLeft,'earned day')+' off. Use them on M1 or M3 days, they cost no leave.':'No earned days off yet. '+(yr.xWorked%2===0?'Work 2 more X shifts for the next one.':'Work 1 more X shift for the next one.'))+'</p>');
+  o.push('<p>'+plural(fr,'more Friday')+' before the reset. Fridays are free and never use leave.</p>');
+  $('planBox').innerHTML=o.join('');
+}
+
+/* ---------- Roster tab ---------- */
+var RS={name:'',tables:{}}, RP={map:null,people:[]};
+async function loadRoster(){
+  var v=null;
+  if(S.mode==='cloud'){try{var s=await withTimeout(col().doc('roster').get(),8000);if(s.exists) v=clone(s.data());}catch(e){}}
+  else v=lsGet('lt:roster');
+  if(v&&typeof v==='object'){RS.name=typeof v.name==='string'?v.name:'';RS.tables=(v.tables&&typeof v.tables==='object')?v.tables:{};}
+}
+async function saveRoster(){
+  try{if(S.mode==='cloud') await col().doc('roster').set(RS); else lsSet('lt:roster',RS);}catch(e){}
+}
+function isSymCell(v){v=String(v).toUpperCase();return !!SYM[v]||v==='-'||v==='OFF';}
+function parseRoster(text){
+  var rows=text.split(/\r?\n/).filter(function(l){return l.trim();}).map(function(l){
+    var sep=l.indexOf('\t')>=0?'\t':(l.indexOf(',')>=0?',':(l.indexOf(';')>=0?';':/\s{2,}/));
+    return l.split(sep).map(function(c){return c.trim();});
+  });
+  var map=null, people=[];
+  rows.forEach(function(r){
+    var nums=[]; r.forEach(function(c,i){if(/^\d{1,2}$/.test(c)&&+c>=1&&+c<=31) nums.push(i);});
+    if(!map&&nums.length>=5){map={};nums.forEach(function(i){map[i]=+r[i];});return;}
+    if(!r.some(isSymCell)) return;
+    var ni=-1;
+    for(var i=0;i<r.length;i++){if(/[A-Za-z\u0600-\u06FF]/.test(r[i])&&!/^(M\d|X\d|OFF|F|FRI)$/i.test(r[i])){ni=i;break;}}
+    if(ni>=0) people.push({name:r[ni],cells:r,ni:ni});
+  });
+  return {map:map,people:people};
+}
+function personCells(p,map){
+  var out=[];
+  if(map) Object.keys(map).forEach(function(i){out.push([map[i],p.cells[i]||'']);});
+  else for(var k=p.ni+1;k<p.cells.length;k++) out.push([k-p.ni,p.cells[k]||'']);
+  return out;
+}
+function rosterRead(save){
+  var ym=$('rMonth').value, txt=$('rText').value;
+  if(save) RS.tables[ym]=txt;
+  RP=txt.trim()?parseRoster(txt):{map:null,people:[]};
+  var sel=$('rName'), k=-1;
+  sel.innerHTML='<option value="">Choose your name</option>'+RP.people.map(function(p,i){return '<option value="'+i+'">'+esc(p.name)+'</option>';}).join('');
+  RP.people.forEach(function(p,i){if(RS.name&&p.name.toLowerCase()===RS.name.toLowerCase()) k=i;});
+  if(k>=0) sel.value=String(k);
+  $('rMsg').textContent=RP.people.length?'Found '+plural(RP.people.length,'name')+(k>=0?'. Your name is selected.':'. Choose your name.'):
+    (txt.trim()?'I could not find any names. Each row needs a name, then M1, M3, X1, X2 or - for each day.':'Paste the table, then tap Read table.');
+  if(save) saveRoster();
+}
+async function rosterApply(){
+  var i=$('rName').value;
+  if(i===''||!RP.people[+i]){$('rMsg').textContent='Read the table and choose your name first.';return;}
+  var ym=$('rMonth').value, p=RP.people[+i];
+  RS.name=p.name; saveRoster();
+  await ensureMonths([ym]);
+  if(S.sample){S.sample=false;S.sampleDays=null;}
+  var pp=ym.split('-').map(Number), n=new Date(pp[0],pp[1],0).getDate();
+  var days=S.months[ym]||(S.months[ym]={}), set=0, off=0, unk=[];
+  personCells(p,RP.map).forEach(function(c){
+    var d=c[0], v=String(c[1]).toUpperCase();
+    if(d<1||d>n||v==='') return;
+    var date=ym+'-'+pad(d), x=days[date]||(days[date]={});
+    if(SYM[v]){x.s=v;set++;}
+    else if(v==='-'||v==='OFF'){delete x.s;delete x.c;off++;}
+    else if(unk.indexOf(v)<0) unk.push(v);
+  });
+  queueSave(ym); buildRows(); update(); flush();
+  $('rMsg').textContent='Done for '+p.name+': '+plural(set,'shift')+' set, '+plural(off,'day')+' off.'+(unk.length?' Not recognised: '+unk.join(', ')+'.':'')+' Check it in the Month or Year tab.';
+}
+var PIC=null;
+async function initPic(){
+  try{
+    if(!window.claude||!window.claude.use) return;
+    var s=await window.claude.use('sample'); if(!s) return;
+    var l=await s.limits(); if(!l||!l.images) return;
+    PIC=s; $('rPicBox').hidden=false;
+  }catch(e){}
+}
+async function readPic(){
+  var f=$('rPic').files[0], m=$('rPicMsg'); if(!f||!PIC) return;
+  m.hidden=false; m.textContent='Reading the picture… this can take up to a minute.';
+  try{
+    var r=await PIC('This is a photo of a work roster table: names down the side, one column per day. Copy it into plain text, one row per line, cells separated by a tab character. Start with the header row of day numbers if the picture has one. Write each shift symbol exactly as printed (for example M1, M3, X1, X2). Write - for an empty or off cell. Output only the table, no explanation, no code fences.',{images:[f],cache:false});
+    $('rText').value=r.text.replace(/```[a-z]*/g,'').trim();
+    rosterRead(true);
+    m.textContent='Picture read'+(r.truncated?', but it was cut short':'')+'. Check your row against the picture before using it.';
+  }catch(e){
+    m.textContent=e&&e.code==='not_granted'?'Permission was declined, so the picture was not read.':'Could not read the picture. Try a clearer photo, or paste the table text.';
+  }
+  $('rPic').value='';
+}
+function initRoster(){
+  initPic();
+  var Y=+S.today.slice(0,4);
+  $('rMonth').innerHTML=calMonths(Y).map(function(ym,i){return '<option value="'+ym+'">'+MONL[i]+' '+Y+'</option>';}).join('');
+  $('rMonth').value=S.cur;
+  $('rText').value=RS.tables[S.cur]||'';
+  rosterRead(false);
+}
+
+/* ---------- boot ---------- */
+async function boot(){
+  document.querySelectorAll('[id]').forEach(function(n){el[n.id]=n;});
+  $('tSym').innerHTML=symOptions(true);
+  S.today=localToday(); S.cur=S.today.slice(0,7); S.ym=S.cur;
+  fillSettingsForm();
+  var nd=new Date(); $('fitIn').value=pad(nd.getHours())+':'+pad(nd.getMinutes());
+  bind();
+  showTab(tabFromHash());
+  S.sample=true; S.sampleDays=sampleDays(S.ym);
+  buildRows(); update(); setLoading(true);
+  setInterval(function(){renderToday();},20000);
+  await Promise.race([initStore(),sleep(7000)]);
+  await loadSettings();
+  await ensureMonths(lyMonths(S.cur,settings.resetMonth).concat([S.cur]).concat(Object.keys(ROSTER)).concat(calMonths(+S.today.slice(0,4))));
+  await loadRoster(); initRoster();
+  seedRoster();
+  if(S.hasSettings) S.hasData=true;
+  S.sample=!S.hasData;
+  if(!S.sample) S.sampleDays=null;
+  buildRows(); update(); setLoading(false);
+  setNote(storageNote());
+}
+boot();
+})();
+</script>
+
+</body></html>
